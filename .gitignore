@@ -504,3 +504,6 @@ Debug/
 Release/
 x64/
 Win32/
+
+# Agent instructions (not part of the codebase)
+AGENTS.md
