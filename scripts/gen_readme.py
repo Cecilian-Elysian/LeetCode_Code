@@ -236,11 +236,12 @@ BOTTOM_PAD = 6
 
 
 def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
-    """Render the heatmap to a PNG and return a Markdown image reference.
+    """Render the heatmap as an SVG file and return a Markdown image reference.
 
-    GitHub's markdown renderer strips most SVG elements, so a PNG file
-    committed to the repo and referenced via ![](...) is the only reliable
-    way to show the heatmap on a GitHub README.
+    GitHub renders <img src="*.svg"> correctly, and the browser shows the
+    SVG's <title> element as a native tooltip on hover. This gives us
+    per-day detail ("2025-12-28: 2 题") without GitHub's HTML sanitizer
+    stripping the markup (which happens with inline SVG).
     """
     active_dates = [d for d, c in counts.items() if c > 0]
     start = min(active_dates) if active_dates else end_saturday - timedelta(days=7 * 53)
@@ -259,101 +260,67 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
     if grid and grid[-1][0] == total_cols - 1 and grid[-1][1] != 0:
         total_cols += 1
 
-    # Render to PNG via Pillow at higher pixel density for sharpness.
-    scale = 2
-    width = (LEFT_PAD + total_cols * (CELL + GAP) + RIGHT_PAD) * scale
-    height = (TOP_PAD + 7 * (CELL + GAP) + BOTTOM_PAD + 4) * scale
+    width = LEFT_PAD + total_cols * (CELL + GAP) + RIGHT_PAD
+    height = TOP_PAD + 7 * (CELL + GAP) + BOTTOM_PAD
 
-    from PIL import Image, ImageDraw, ImageFont
+    parts: list[str] = []
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" '
+        f'role="img" aria-label="提交热力图">'
+    )
 
-    img = Image.new("RGB", (width, height), "#0d1117")
-    draw = ImageDraw.Draw(img)
-
-    # Try to load a system font; fall back to default.
-    font = None
-    for candidate in [
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/simhei.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]:
-        try:
-            font = ImageFont.truetype(candidate, 10 * scale)
-            break
-        except OSError:
-            continue
-    if font is None:
-        font = ImageFont.load_default()
-
-    def hex_to_rgb(h: str) -> tuple[int, int, int]:
-        h = h.lstrip("#")
-        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-
-    palette = [hex_to_rgb(c) for c in LEVEL_COLORS]
-    label_color = hex_to_rgb("#7d8590")
-
-    # Month labels.
+    # Month labels — only the first Sunday of each new month.
     month_seen: set[int] = set()
     for c, _r, d in grid:
         key = (d.year, d.month)
         if key in month_seen:
             continue
         month_seen.add(key)
-        x = (LEFT_PAD + c * (CELL + GAP)) * scale
-        draw.text((x, 4 * scale), f"{d.year}-{d.month:02d}", fill=label_color, font=font)
+        x = LEFT_PAD + c * (CELL + GAP)
+        parts.append(
+            f'  <text x="{x}" y="14" font-size="10" fill="#7d8590" '
+            f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
+            f'{d.year}-{d.month:02d}</text>'
+        )
 
     # Weekday labels.
-    weekday_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
-    for row, label in weekday_labels.items():
-        y = (TOP_PAD + row * (CELL + GAP)) * scale
-        draw.text((0, y + 1 * scale), label, fill=label_color, font=font)
+    for row, label in {1: "Mon", 3: "Wed", 5: "Fri"}.items():
+        y = TOP_PAD + row * (CELL + GAP) + CELL - 2
+        parts.append(
+            f'  <text x="0" y="{y}" font-size="10" fill="#7d8590" '
+            f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
+            f'{label}</text>'
+        )
 
-    # Cells.
+    # Cells — each carries a <title> child for hover tooltip.
     for c, r, d in grid:
-        x = (LEFT_PAD + c * (CELL + GAP)) * scale
-        y = (TOP_PAD + r * (CELL + GAP)) * scale
+        x = LEFT_PAD + c * (CELL + GAP)
+        y = TOP_PAD + r * (CELL + GAP)
         n = counts.get(d, 0)
         if n <= 0:
-            color = palette[0]
+            color = LEVEL_COLORS[0]
         elif n == 1:
-            color = palette[1]
+            color = LEVEL_COLORS[1]
         elif n == 2:
-            color = palette[2]
+            color = LEVEL_COLORS[2]
         elif n == 3:
-            color = palette[3]
+            color = LEVEL_COLORS[3]
         else:
-            color = palette[4]
-        radius = 2 * scale
-        draw.rounded_rectangle(
-            [x, y, x + CELL * scale, y + CELL * scale],
-            radius=radius,
-            fill=color,
+            color = LEVEL_COLORS[4]
+        tip = f"{n} 题" if n > 0 else "无提交"
+        parts.append(
+            f'  <rect x="{x}" y="{y}" width="{CELL}" height="{CELL}" '
+            f'rx="2" ry="2" fill="{color}">'
+            f'<title>{d.isoformat()}: {tip}</title></rect>'
         )
 
-    # Legend.
-    legend_y = (TOP_PAD + 7 * (CELL + GAP) + 2) * scale
-    legend_x = LEFT_PAD * scale
-    draw.text((legend_x, legend_y + 1 * scale), "少", fill=label_color, font=font)
-    for i, color in enumerate(palette):
-        x = legend_x + 22 * scale + i * (CELL + 2) * scale
-        draw.rounded_rectangle(
-            [x, legend_y, x + CELL * scale, legend_y + CELL * scale],
-            radius=2 * scale,
-            fill=color,
-        )
-    draw.text(
-        (legend_x + 22 * scale + 5 * (CELL + 2) * scale + 4,
-         legend_y + 1 * scale),
-        "多",
-        fill=label_color,
-        font=font,
-    )
+    parts.append("</svg>")
 
-    out_path = REPO_ROOT / "scripts" / "heatmap.png"
-    img.save(out_path, "PNG", optimize=True)
-    # Append a cache-busting query so GitHub's CDN doesn't keep serving a stale
-    # white-background PNG after a palette change.
+    out_path = REPO_ROOT / "scripts" / "heatmap.svg"
+    out_path.write_text("\n".join(parts), encoding="utf-8")
+
     import hashlib
     digest = hashlib.md5(out_path.read_bytes()).hexdigest()[:8]
     rel = out_path.relative_to(REPO_ROOT).as_posix()

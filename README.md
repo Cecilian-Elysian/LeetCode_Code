@@ -6,7 +6,7 @@
 
 ## 提交热力图
 
-![提交热力图](scripts/heatmap.png?v=a4d3b6da)
+![提交热力图](scripts/heatmap.svg?v=7780aecd)
 
 ## 统计总览
 
