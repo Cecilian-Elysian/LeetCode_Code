@@ -436,7 +436,6 @@ def render_readme(problems: list[Problem]) -> str:
 {lang_md}
 
 > 注：`2026.4.8/` 目录为课程作业（打印素数表），不计入 LeetCode 统计。
-> 文件夹名含"未完"表示仍在进行中。
 > 2026-07 起新增 Python 题解，C 语言为主要实现。
 
 ## 联系方式
