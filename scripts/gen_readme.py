@@ -227,10 +227,10 @@ def compute_streaks(counts: dict[date, int]) -> tuple[int, int]:
 # Heatmap (SVG)
 # --------------------------------------------------------------------------- #
 
-CELL = 14
-GAP = 4
-LEFT_PAD = 36
-TOP_PAD = 26
+CELL = 18
+GAP = 5
+LEFT_PAD = 42
+TOP_PAD = 30
 RIGHT_PAD = 6
 BOTTOM_PAD = 6
 
@@ -279,7 +279,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
         month_seen.add(key)
         x = LEFT_PAD + c * (CELL + GAP)
         parts.append(
-            f'  <text x="{x}" y="16" font-size="11" fill="#7d8590" '
+            f'  <text x="{x}" y="18" font-size="13" fill="#7d8590" '
             f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
             f'{d.year}-{d.month:02d}</text>'
         )
@@ -288,7 +288,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
     for row, label in {1: "Mon", 3: "Wed", 5: "Fri"}.items():
         y = TOP_PAD + row * (CELL + GAP) + CELL - 3
         parts.append(
-            f'  <text x="0" y="{y}" font-size="11" fill="#7d8590" '
+            f'  <text x="0" y="{y}" font-size="13" fill="#7d8590" '
             f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
             f'{label}</text>'
         )
@@ -322,73 +322,6 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
     digest = hashlib.md5(out_path.read_bytes()).hexdigest()[:8]
     rel = out_path.relative_to(REPO_ROOT).as_posix()
     return f"<img src=\"{rel}?v={digest}\" alt=\"提交热力图\"/>"
-
-
-def render_daily_table(counts: dict[date, int]) -> str:
-    """Render a collapsible weekly-grid HTML table with native tooltips.
-
-    Each cell uses <abbr title="date: N 题">▢</abbr> so the browser
-    shows the date and submission count on hover. GitHub keeps <abbr>
-    intact, unlike SVG <title>.
-    """
-    if not counts:
-        return ""
-
-    start = min(counts)
-    end = max(counts)
-    # Walk every day; bucket by ISO week starting Sunday.
-    weeks: list[list[date | None]] = []
-    cur = start - timedelta(days=(start.weekday() + 1) % 7)
-    week: list[date | None] = []
-    while cur <= end + timedelta(days=6 - (end.weekday() + 1) % 7):
-        if cur < start or cur > end:
-            week.append(None)
-        else:
-            week.append(cur)
-        if len(week) == 7:
-            weeks.append(week)
-            week = []
-        cur += timedelta(days=1)
-    if week:
-        while len(week) < 7:
-            week.append(None)
-        weeks.append(week)
-
-    level_glyph = {0: "·", 1: "▪", 2: "■", 3: "▣", 4: "▣"}
-    level_color = {0: "#161b22", 1: "#0e4429", 2: "#006d32", 3: "#26a641", 4: "#39d353"}
-
-    lines: list[str] = []
-    lines.append("<details>")
-    lines.append("<summary>📅 查看每日明细（鼠标悬停查看日期与题数）</summary>")
-    lines.append("")
-    lines.append("<table>")
-    lines.append(
-        "<thead><tr>"
-        "<th>周日</th><th>周一</th><th>周二</th><th>周三</th><th>周四</th>"
-        "<th>周五</th><th>周六</th>"
-        "</tr></thead>"
-    )
-    lines.append("<tbody>")
-    for wk in weeks:
-        lines.append("<tr>")
-        for d in wk:
-            if d is None:
-                lines.append("<td></td>")
-                continue
-            n = counts.get(d, 0)
-            level = 0 if n <= 0 else (1 if n == 1 else (2 if n == 2 else (3 if n == 3 else 4)))
-            glyph = level_glyph[level]
-            tip = f"{d.isoformat()}: 无提交" if n <= 0 else f"{d.isoformat()}: {n} 题"
-            color = level_color[level]
-            lines.append(
-                f'<td align="center"><abbr title="{tip}" '
-                f'style="color:{color};text-decoration:none">{glyph}</abbr></td>'
-            )
-        lines.append("</tr>")
-    lines.append("</tbody>")
-    lines.append("</table>")
-    lines.append("</details>")
-    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -425,7 +358,6 @@ def render_readme(problems: list[Problem]) -> str:
     end_saturday = today + timedelta(days=(5 - today.weekday()) % 7)
 
     svg = build_heatmap(counts, end_saturday)
-    daily_table = render_daily_table(counts)
 
     table_lines = [
         "| 月份 | 总数 | 完成 | 未完 | 状态 |",
@@ -450,8 +382,6 @@ def render_readme(problems: list[Problem]) -> str:
 ## 提交热力图
 
 {svg}
-
-{daily_table}
 
 ## 统计总览
 
