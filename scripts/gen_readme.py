@@ -256,6 +256,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
     width = LEFT_PAD + total_cols * (CELL + GAP) + RIGHT_PAD
     height = TOP_PAD + 7 * (CELL + GAP) + BOTTOM_PAD
 
+    font = "-apple-system,Segoe UI,Helvetica,Arial,sans-serif"
     parts: list[str] = []
     parts.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -264,6 +265,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
         f'role="img" aria-label="提交热力图">'
     )
 
+    # Month labels — only render the first Sunday of each new month.
     month_seen: set[int] = set()
     for c, _r, d in grid:
         key = (d.year, d.month)
@@ -272,65 +274,60 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
         month_seen.add(key)
         x = LEFT_PAD + c * (CELL + GAP)
         parts.append(
-            f'<text x="{x}" y="14" font-size="10" fill="#57606a" '
-            f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
-            f'{d.year}-{d.month:02d}</text>'
+            f'  <text x="{x}" y="14" font-size="10" fill="#57606a" '
+            f'font-family="{font}">{d.year}-{d.month:02d}</text>'
         )
 
-    weekday_labels = {1: "Mon", 3: "Wed", 5: "Fri"}
-    for row, label in weekday_labels.items():
+    # Weekday labels.
+    for row, label in {1: "Mon", 3: "Wed", 5: "Fri"}.items():
         y = TOP_PAD + row * (CELL + GAP) + CELL - 2
         parts.append(
-            f'<text x="0" y="{y}" font-size="10" fill="#57606a" '
-            f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">'
-            f'{label}</text>'
+            f'  <text x="0" y="{y}" font-size="10" fill="#57606a" '
+            f'font-family="{font}">{label}</text>'
         )
 
+    # Cells — one per line so GitHub markdown parser keeps the SVG intact.
     for c, r, d in grid:
         x = LEFT_PAD + c * (CELL + GAP)
         y = TOP_PAD + r * (CELL + GAP)
         n = counts.get(d, 0)
         if n <= 0:
             color = LEVEL_COLORS[0]
-            tip = f"{d.isoformat()}: 无提交"
         elif n == 1:
             color = LEVEL_COLORS[1]
-            tip = f"{d.isoformat()}: {n} 题"
         elif n == 2:
             color = LEVEL_COLORS[2]
-            tip = f"{d.isoformat()}: {n} 题"
         elif n == 3:
             color = LEVEL_COLORS[3]
-            tip = f"{d.isoformat()}: {n} 题"
         else:
             color = LEVEL_COLORS[4]
-            tip = f"{d.isoformat()}: {n} 题"
+        tip = "无提交" if n <= 0 else f"{n} 题"
         parts.append(
-            f'<rect x="{x}" y="{y}" width="{CELL}" height="{CELL}" '
+            f'  <rect x="{x}" y="{y}" width="{CELL}" height="{CELL}" '
             f'rx="2" ry="2" fill="{color}">'
-            f'<title>{tip}</title></rect>'
+            f'<title>{d.isoformat()}: {tip}</title></rect>'
         )
 
+    # Legend.
     legend_y = TOP_PAD + 7 * (CELL + GAP) + 2
     legend_x = LEFT_PAD
     parts.append(
-        f'<text x="{legend_x}" y="{legend_y + 9}" font-size="10" fill="#57606a" '
-        f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">少</text>'
+        f'  <text x="{legend_x}" y="{legend_y + 9}" font-size="10" fill="#57606a" '
+        f'font-family="{font}">少</text>'
     )
     for i, color in enumerate(LEVEL_COLORS):
         x = legend_x + 22 + i * (CELL + 2)
         parts.append(
-            f'<rect x="{x}" y="{legend_y}" width="{CELL}" height="{CELL}" '
+            f'  <rect x="{x}" y="{legend_y}" width="{CELL}" height="{CELL}" '
             f'rx="2" ry="2" fill="{color}"/>'
         )
     parts.append(
-        f'<text x="{legend_x + 22 + 5 * (CELL + 2) + 4}" y="{legend_y + 9}" '
-        f'font-size="10" fill="#57606a" '
-        f'font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">多</text>'
+        f'  <text x="{legend_x + 22 + 5 * (CELL + 2) + 4}" y="{legend_y + 9}" '
+        f'font-size="10" fill="#57606a" font-family="{font}">多</text>'
     )
 
     parts.append("</svg>")
-    return "".join(parts)
+    return "\n".join(parts)
 
 
 # --------------------------------------------------------------------------- #
