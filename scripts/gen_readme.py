@@ -45,8 +45,8 @@ DATE_PATTERNS = [
 
 WIP_SUFFIX = "未完"
 
-# GitHub palette
-LEVEL_COLORS = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"]
+# GitHub palette (light + dark)
+LEVEL_COLORS = ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"]
 
 
 @dataclass
@@ -266,7 +266,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
 
     from PIL import Image, ImageDraw, ImageFont
 
-    img = Image.new("RGB", (width, height), "#ffffff")
+    img = Image.new("RGB", (width, height), "#0d1117")
     draw = ImageDraw.Draw(img)
 
     # Try to load a system font; fall back to default.
@@ -291,7 +291,7 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
         return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
     palette = [hex_to_rgb(c) for c in LEVEL_COLORS]
-    label_color = hex_to_rgb("#57606a")
+    label_color = hex_to_rgb("#7d8590")
 
     # Month labels.
     month_seen: set[int] = set()
@@ -352,7 +352,12 @@ def build_heatmap(counts: dict[date, int], end_saturday: date) -> str:
 
     out_path = REPO_ROOT / "scripts" / "heatmap.png"
     img.save(out_path, "PNG", optimize=True)
-    return f"![提交热力图]({out_path.relative_to(REPO_ROOT).as_posix()})"
+    # Append a cache-busting query so GitHub's CDN doesn't keep serving a stale
+    # white-background PNG after a palette change.
+    import hashlib
+    digest = hashlib.md5(out_path.read_bytes()).hexdigest()[:8]
+    rel = out_path.relative_to(REPO_ROOT).as_posix()
+    return f"![提交热力图]({rel}?v={digest})"
 
 
 # --------------------------------------------------------------------------- #
