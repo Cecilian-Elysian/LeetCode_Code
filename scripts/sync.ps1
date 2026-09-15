@@ -35,6 +35,9 @@ function Test-StagedChanges {
 $repoRoot = (& git rev-parse --show-toplevel).Trim()
 Set-Location -LiteralPath $repoRoot
 
+# Clean build artifacts before staging so only source is committed
+& "$repoRoot/scripts/clean.ps1"
+
 & git add .
 if (Test-StagedChanges) {
     if ([string]::IsNullOrWhiteSpace($Message)) {
