@@ -1,0 +1,13 @@
+{
+  "configurations": [
+    {
+      "name": "gcc",
+      "compilerPath": "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+      "intelliSenseMode": "gcc-x64",
+      "includePath": [
+        "${workspaceFolder}/**"
+      ]
+    }
+  ],
+  "version": 4
+}
