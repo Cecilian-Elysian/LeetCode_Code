@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import quote
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README_PATH = REPO_ROOT / "README.md"
@@ -55,6 +56,35 @@ class Problem:
     title: str
     is_wip: bool
     language: str  # "C" or "Python"
+    num: str           # LeetCode problem number ("" if unnumbered)
+    slug: str          # camelCase slug, e.g. "twoSum" ("" if absent)
+    path: str          # relative path to source file (for jump links)
+    category: str      # primary category (Chinese), see CATEGORY_BY_NUM
+
+
+# Primary category (Chinese) per LeetCode problem number. Add entries here
+# when you solve a new problem; otherwise it falls back to "其他".
+# Categories: 数组 / 字符串 / 哈希表 / 链表 / 树 / 栈 / 数学 /
+#             位运算 / 双指针 / 排序 / 滑动窗口 / 前缀和 / 动态规划 / 模拟
+CATEGORY_BY_NUM: dict[int, str] = {
+    1: "数组", 2: "链表", 4: "数组", 5: "字符串", 6: "字符串",
+    9: "数学", 12: "数学", 13: "哈希表", 14: "字符串", 20: "栈",
+    21: "链表", 26: "数组", 27: "数组", 28: "字符串", 34: "数组",
+    35: "数组", 49: "哈希表", 58: "字符串", 66: "数组", 67: "位运算",
+    69: "数学", 70: "动态规划", 88: "数组", 100: "树", 101: "树",
+    104: "树", 108: "树", 167: "数组", 206: "链表", 643: "数组",
+    704: "数组", 744: "数组", 867: "数组", 961: "哈希表", 1170: "字符串",
+    1343: "数组", 1385: "数组", 1422: "字符串", 1423: "数组", 1456: "字符串",
+    1769: "位运算", 1833: "数组", 2090: "数组", 2235: "数学", 2236: "树",
+    2379: "字符串", 2413: "数学", 2461: "数组", 2469: "数学", 2529: "数组",
+    2586: "字符串", 2841: "数组", 3614: "字符串", 3658: "数学", 3679: "字符串",
+}
+
+CATEGORY_ORDER = [
+    "数组", "字符串", "哈希表", "链表", "树", "栈", "数学",
+    "位运算", "双指针", "排序", "滑动窗口", "前缀和", "动态规划",
+    "模拟", "其他",
+]
 
 
 def _decode_filename(raw: bytes) -> str | None:
@@ -108,7 +138,7 @@ def _parse_problem_dir(entry: Path, name: str) -> Problem | None:
     parsed_date = _parse_date_prefix(name)
     fallback_name = name
     if parsed_date is None:
-        # Look one level deeper for a well-named child.
+        # Outer folder has no date — try inner folders.
         for child in entry.iterdir():
             if child.is_dir():
                 sub = _parse_date_prefix(child.name)
@@ -118,11 +148,42 @@ def _parse_problem_dir(entry: Path, name: str) -> Problem | None:
                     break
     if parsed_date is None:
         return None
+
+    # Look for a source file: prefer the outer folder, fall back to the inner
+    # (date-bearing) subfolder if the outer has none.
+    src_rel: str | None = None
+    outer_src = _find_source_file(entry)
+    if outer_src:
+        src_rel = outer_src
+    elif fallback_name != name:
+        inner = entry / fallback_name
+        if inner.is_dir():
+            inner_src = _find_source_file(inner)
+            if inner_src:
+                src_rel = f"{fallback_name}/{inner_src}"
+
+    if src_rel:
+        rel_path = (entry / src_rel).relative_to(REPO_ROOT).as_posix()
+        slug_base = src_rel.split("/")[-1]
+        slug = re.sub(r"\.(c|py|cpp)$", "", slug_base, flags=re.IGNORECASE)
+        if slug in {"源", "source"}:
+            slug = ""
+    else:
+        rel_path = entry.relative_to(REPO_ROOT).as_posix()
+        slug = ""
+
+    num, _ = _parse_num_and_slug(fallback_name)
+    category = CATEGORY_BY_NUM.get(int(num), "其他") if num.isdigit() else "其他"
+
     return Problem(
         date=parsed_date,
         title=fallback_name,
         is_wip=(WIP_SUFFIX in fallback_name),
         language=_detect_language_from_dir(entry),
+        num=num,
+        slug=slug,
+        path=rel_path,
+        category=category,
     )
 
 
@@ -139,11 +200,18 @@ def _parse_problem_file(entry: Path, name: str) -> Problem | None:
         mtime = datetime.fromtimestamp(entry.stat().st_mtime).date()
         parsed_date = mtime
     lang = "Python" if suffix == ".py" else "C"
+    num, slug = _parse_num_and_slug(name)
+    rel_path = entry.relative_to(REPO_ROOT).as_posix()
+    category = CATEGORY_BY_NUM.get(int(num), "其他") if num.isdigit() else "其他"
     return Problem(
         date=parsed_date,
         title=name,
         is_wip=(WIP_SUFFIX in name),
         language=lang,
+        num=num,
+        slug=slug,
+        path=rel_path,
+        category=category,
     )
 
 
@@ -153,6 +221,67 @@ def _detect_language_from_dir(d: Path) -> str:
         if child.is_file() and child.suffix.lower() == ".py":
             return "Python"
     return "C"
+
+
+def _parse_num_and_slug(name: str) -> tuple[str, str]:
+    """Extract LeetCode problem number and camelCase slug from a name.
+
+    Examples:
+        "2026.9.14 1 twoSum.py"        -> ("1",  "twoSum")
+        "26.1.13 13"                   -> ("13", "")
+        "2026.4.26 2841(未完)"         -> ("2841", "")
+        "25.12.28.1422"                -> ("1422", "")
+        "26.1.1 Q1"                    -> ("",   "")
+    """
+    m_num = re.search(r"\s(\d+)\b", name)
+    if not m_num:
+        # Fallback for the legacy "YY.M.D.N" naming, e.g. "25.12.28.1422" → 1422.
+        # Only matches 2-digit-year dates to avoid mistaking "2026.4.6" for #6.
+        m_num = re.match(r"^\d{2}\.\d{1,2}\.\d{1,2}\.(\d+)$", name)
+    if not m_num:
+        return "", ""
+    num = m_num.group(1)
+    rest = name[m_num.end():].strip()
+    rest = re.sub(r"\.(c|py|cpp)$", "", rest, flags=re.IGNORECASE)
+    rest = re.sub(r"\(.*?\)$", "", rest).strip()
+    return num, rest
+
+
+_SKIP_SUBDIRS = {"x64", "x86", "debug", "release", "源文件", "ipch", ".vs"}
+
+
+def _find_source_file(d: Path) -> str | None:
+    """Pick the primary source file inside a problem directory.
+
+    Priority: .py > 源.cpp / source.cpp > .c
+
+    Returns a path relative to ``d`` (may contain one ``/`` if the source
+    file is inside a subdirectory). Returns None if nothing matches.
+    """
+    candidates: list[tuple[int, str]] = []
+    subdirs: list[Path] = []
+    for child in d.iterdir():
+        if child.is_dir():
+            if child.name.lower() not in _SKIP_SUBDIRS:
+                subdirs.append(child)
+            continue
+        n = child.name
+        low = n.lower()
+        if low.endswith(".py"):
+            candidates.append((0, n))
+        elif low in ("源.cpp", "source.cpp"):
+            candidates.append((1, n))
+        elif low.endswith(".c"):
+            candidates.append((2, n))
+    if candidates:
+        candidates.sort()
+        return candidates[0][1]
+    # Recurse one level for the nested "outer/inner/源.cpp" pattern.
+    for sub in subdirs:
+        result = _find_source_file(sub)
+        if result:
+            return f"{sub.name}/{result}"
+    return None
 
 
 def _parse_date_prefix(name: str) -> date | None:
@@ -221,6 +350,58 @@ def compute_streaks(counts: dict[date, int]) -> tuple[int, int]:
             cur = 0
         cur_date += timedelta(days=1)
     return longest, best
+
+
+# --------------------------------------------------------------------------- #
+# Category index
+# --------------------------------------------------------------------------- #
+
+
+def render_category_section(problems: list[Problem]) -> str:
+    """Render the '题目分类' section: jump nav + grouped problem lists."""
+    buckets: dict[str, list[Problem]] = defaultdict(list)
+    for p in problems:
+        buckets[p.category].append(p)
+
+    def sort_key(p: Problem) -> tuple[int, str, str]:
+        return (
+            int(p.num) if p.num.isdigit() else 999999,
+            p.slug,
+            p.title,
+        )
+    for cat in buckets:
+        buckets[cat].sort(key=sort_key)
+
+    lines: list[str] = []
+
+    nav_lines = ["| 分类 | 题数 |", "|------|------|"]
+    for cat in CATEGORY_ORDER:
+        if cat not in buckets:
+            continue
+        count = len(buckets[cat])
+        anchor = f"#{cat}-{count}"
+        nav_lines.append(f"| [{cat} ({count})]({anchor}) | {count} |")
+    lines.append("\n".join(nav_lines))
+    lines.append("")
+
+    for cat in CATEGORY_ORDER:
+        if cat not in buckets:
+            continue
+        items = buckets[cat]
+        lines.append(f"### {cat} ({len(items)})")
+        lines.append("")
+        for p in items:
+            if p.num and p.slug:
+                label = f"#{p.num} {p.slug}"
+            elif p.num:
+                label = f"#{p.num}"
+            else:
+                label = p.title
+            link_target = quote(p.path, safe="/-._~")
+            lines.append(f"- [{label}]({link_target})")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # --------------------------------------------------------------------------- #
@@ -358,6 +539,7 @@ def render_readme(problems: list[Problem]) -> str:
     end_saturday = today + timedelta(days=(5 - today.weekday()) % 7)
 
     svg = build_heatmap(counts, end_saturday)
+    category_md = render_category_section(problems)
 
     table_lines = [
         "| 月份 | 总数 | 完成 | 未完 | 状态 |",
@@ -394,6 +576,10 @@ def render_readme(problems: list[Problem]) -> str:
 ## 月度进度
 
 {table_md}
+
+## 题目分类
+
+{category_md}
 
 ## 语言分布
 
